@@ -1,117 +1,155 @@
-/*
-lista circular simple creacion de lista circular simple
-*/
+// importa Rc (Reference Counted)
+// permite que varios punteros sean dueños del mismo dato
+use std::rc::Rc;
 
-// estructura que representa un nodo de la lista
+// importa RefCell
+// permite modificar datos incluso cuando hay referencias compartidas
+use std::cell::RefCell;
+
+
+// definición de la estructura Nodo
 struct Nodo {
-    // valor almacenado en el nodo (entero)
+
+    // valor que guarda el nodo
     valor: i32,
 
     // puntero al siguiente nodo
-    // Option significa que puede existir nodo o no
-    // Some(nodo) -> hay nodo
-    // None -> no hay nodo
-
-    // Box guarda el nodo en memoria dinámica (heap)
-
-    // en una lista circular real el último nodo apuntaría al primero
-    siguiente: Option<Box<Nodo>>,
+    // Option -> puede ser Some(nodo) o None
+    // Rc -> permite que varios nodos apunten al mismo nodo
+    // RefCell -> permite modificar el nodo en tiempo de ejecución
+    siguiente: Option<Rc<RefCell<Nodo>>>,
 }
+
 
 // estructura de la lista circular
 struct ListaCircular {
-    // puntero al primer nodo de la lista
-    // si la lista está vacía será None
-    cabeza: Option<Box<Nodo>>,
 
-    // cantidad de nodos en la lista
+    // puntero al primer nodo de la lista
+    cabeza: Option<Rc<RefCell<Nodo>>>,
+
+    // puntero al último nodo
+    cola: Option<Rc<RefCell<Nodo>>>,
+
+    // cantidad de elementos de la lista
     size: usize,
 }
 
-// implementación de los métodos de la lista circular
-impl ListaCircular {
-    /**
-     * Crea una nueva lista circular
-     */
 
-    // constructor de la lista
+// implementación de métodos para ListaCircular
+impl ListaCircular {
+
+    // función que crea una nueva lista vacía
     fn nueva() -> Self {
-        // se crea una lista vacía
+
+        // retorna una nueva instancia de ListaCircular
         ListaCircular {
-            // no hay nodos todavía
+
+            // la lista inicia sin nodos
             cabeza: None,
 
-            // tamaño inicial 0
+            // tampoco hay último nodo
+            cola: None,
+
+            // tamaño inicial es 0
             size: 0,
         }
     }
 
-    // insertar un nodo al inicio de la lista
+
+    // función para insertar un nodo al final
     fn insertar(&mut self, valor: i32) {
-        // se crea un nuevo nodo en el heap
-        let nuevo = Box::new(Nodo {
-            // se guarda el valor recibido
+
+        // crea un nuevo nodo en memoria compartida
+        let nuevo = Rc::new(RefCell::new(Nodo {
+
+            // guarda el valor recibido
             valor,
 
-            // el siguiente nodo será la antigua cabeza
-            // take() toma el valor y deja None temporalmente
-            siguiente: self.cabeza.take(),
-        });
+            // inicialmente no apunta a nadie
+            siguiente: None,
+        }));
 
-        // el nuevo nodo pasa a ser la cabeza
-        self.cabeza = Some(nuevo);
+
+        // toma la cola actual y la deja en None temporalmente
+        match self.cola.take() {
+
+            // caso donde la lista ya tiene nodos
+            Some(vieja_cola) => {
+
+                // el nodo que era el último ahora apunta al nuevo nodo
+                vieja_cola.borrow_mut().siguiente = Some(nuevo.clone());
+
+                // el nuevo nodo ahora se convierte en la cola
+                self.cola = Some(nuevo.clone());
+
+                // se conecta la cola con la cabeza para mantener la circularidad
+                self.cola
+                    .as_ref()          // obtiene referencia a la cola
+                    .unwrap()          // saca el Option (sabemos que existe)
+                    .borrow_mut()      // permite modificar el nodo
+                    .siguiente = self.cabeza.clone(); // apunta a la cabeza
+            }
+
+
+            // caso donde la lista está vacía
+            None => {
+
+                // el nuevo nodo se convierte en la cabeza
+                self.cabeza = Some(nuevo.clone());
+
+                // también es la cola
+                self.cola = Some(nuevo.clone());
+
+                // el nodo apunta a sí mismo
+                // esto crea el ciclo en la lista circular
+                nuevo.borrow_mut().siguiente = Some(nuevo.clone());
+            }
+        }
 
         // aumenta el tamaño de la lista
         self.size += 1;
     }
 
-    /**
-     * Elimina un elemento al inicio de la lista
-     */
 
-    fn eliminar(&mut self) -> Option<i32> {
-        // match revisa si existe un nodo en la cabeza
-        match self.cabeza.take() {
-            // si hay nodo
-            Some(nodo) => {
-                // la cabeza ahora será el siguiente nodo
-                self.cabeza = nodo.siguiente;
-
-                // disminuye el tamaño de la lista
-                self.size -= 1;
-
-                // retorna el valor del nodo eliminado
-                Some(nodo.valor)
-            }
-
-            // si la lista está vacía
-            None => None,
-        }
-    }
-
-    /**
-     * Muestra todos los nodos de la lista
-     */
-
+    // función para mostrar los elementos de la lista
     fn mostrar(&self) {
-        // variable temporal para recorrer la lista
-        // empieza en la cabeza
-        let mut actual = &self.cabeza;
 
-        // mientras exista nodo
-        while let Some(nodo) = actual {
-            // imprime el valor del nodo
-            println!("{}", nodo.valor);
+        // si la lista está vacía
+        if self.cabeza.is_none() {
 
-            // pasa al siguiente nodo
-            actual = &nodo.siguiente;
+            // termina la función
+            return;
         }
+
+        // empieza el recorrido desde la cabeza
+        let mut actual = self.cabeza.clone();
+
+
+        // recorre exactamente la cantidad de nodos
+        // esto evita un bucle infinito
+        for _ in 0..self.size {
+
+            // si existe un nodo
+            if let Some(nodo) = actual {
+
+                // imprime el valor del nodo
+                print!("{} -> ", nodo.borrow().valor);
+
+                // se mueve al siguiente nodo
+                actual = nodo.borrow().siguiente.clone();
+            }
+        }
+
+        // mensaje final indicando que la lista vuelve al inicio
+        println!("(vuelve al inicio)");
     }
 }
 
+
 // función principal del programa
 fn main() {
-    // crea una lista circular vacía
+
+    // crea una nueva lista circular vacía
     let mut lista = ListaCircular::nueva();
 
     // inserta el valor 1
@@ -123,12 +161,6 @@ fn main() {
     // inserta el valor 3
     lista.insertar(3);
 
-    // muestra los elementos de la lista
-    lista.mostrar();
-
-    // elimina el primer nodo
-    lista.eliminar();
-
-    // muestra la lista después de eliminar
+    // muestra la lista
     lista.mostrar();
 }

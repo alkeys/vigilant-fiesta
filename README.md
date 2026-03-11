@@ -134,47 +134,63 @@ Una lista circular simple es una variación de la lista enlazada donde **el últ
 
 ### ✨ Implementación y Explicación de Código:
 
+Para implementar una verdadera lista circular en Rust (donde el último nodo apunta al inicio) sorteando el sistema estricto de _Ownership_ y evitar recurrir a bloques `unsafe`, implementamos la memoria compartida a través de `Rc` y `RefCell`.
+
+#### Estructura Principal del Nodo y la Lista
+
 ```rust
+use std::rc::Rc;
+use std::cell::RefCell;
+
 struct Nodo {
-    // valor almacenado en el nodo (entero)
     valor: i32,
+    // Option -> puede ser Some(nodo) o None
+    // Rc -> permite múltiples dueños del mismo dato
+    // RefCell -> mutabilidad interior en memoria compartida
+    siguiente: Option<Rc<RefCell<Nodo>>>,
+}
 
-    // puntero al siguiente nodo
-    // Option significa que puede existir nodo o no
-    // Some(nodo) -> hay nodo
-    // None -> no hay nodo
-
-    // Box guarda el nodo en memoria dinámica (heap)
-
-    // en una lista circular real el último nodo apuntaría al primero
-    siguiente: Option<Box<Nodo>>,
+struct ListaCircular {
+    cabeza: Option<Rc<RefCell<Nodo>>>,
+    cola: Option<Rc<RefCell<Nodo>>>, // mantenemos la cola para agilizar las inserciones al final
+    size: usize,
 }
 ```
 
-Como destaca la sección comentada del código, la estructura base nos da los cimientos con `Option<Box<Nodo>>`. OJO: Crear una verdadera recursión infinita circular en la memoria en Rust (que el último box apunte al box inicial) viola las reglas de Ownership estrictas de `Box` (un solo dueño). Por eso es válido comentar que en una _lista circular real_, si quisiéramos implementarla completamente en código Rust y mantener ciclos bidireccionales fuertes sin usar `unsafe`, tendríamos que apoyarnos frecuentemente de punteros como `Rc` y `RefCell`.
+Con `Rc`, podemos generar múltiples referencias estables a un mismo nodo compartiendo la misma memoria (ref-counting), permitiendo el cierre del ciclo de la cola a la cabeza; con `RefCell`, logramos modificar los enlaces de nuestros nodos de forma segura en tiempo de ejecución, a pesar de que solo contemos con punteros o iteradores que de otra forma hubiesen bloqueado la mutabilidad.
 
-Aquí la función de inserción:
+#### Operación de Inserción (Al Final)
 
 ```rust
-    // insertar un nodo al inicio de la lista
     fn insertar(&mut self, valor: i32) {
-        // se crea un nuevo nodo en el heap
-        let nuevo = Box::new(Nodo {
-            // se guarda el valor recibido
+        let nuevo = Rc::new(RefCell::new(Nodo {
             valor,
+            siguiente: None,
+        }));
 
-            // el siguiente nodo será la antigua cabeza
-            // take() toma el valor y deja None temporalmente
-            siguiente: self.cabeza.take(),
-        });
+        match self.cola.take() {
+            Some(vieja_cola) => {
+                // Si la lista ya tiene elementos, el último ahora apunta al nuevo
+                vieja_cola.borrow_mut().siguiente = Some(nuevo.clone());
+                self.cola = Some(nuevo.clone());
 
-        // el nuevo nodo pasa a ser la cabeza
-        self.cabeza = Some(nuevo);
+                // Conectamos de nuevo la cola con la cabeza para cerrar el círculo
+                self.cola.as_ref().unwrap().borrow_mut().siguiente = self.cabeza.clone();
+            }
+            None => {
+                // Si la lista está vacía, el nuevo nodo es tanto cabeza como cola
+                self.cabeza = Some(nuevo.clone());
+                self.cola = Some(nuevo.clone());
 
-        // aumenta el tamaño de la lista
+                // El nodo apunta a sí mismo (ciclo de un solo nodo)
+                nuevo.borrow_mut().siguiente = Some(nuevo.clone());
+            }
+        }
         self.size += 1;
     }
 ```
+
+La mutabilidad compartida brilla aquí: tomamos `self.cola` y mutamos el puntero que llevaba guardado su interior utilizando `borrow_mut()` (provisto por `RefCell`), redireccionándolo hacia la cabeza guardada para crear ese ciclo seguro en memoria cerrando la estructura circular perfectamente.
 
 ---
 
